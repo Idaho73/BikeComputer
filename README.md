@@ -1,97 +1,237 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# 🚴 BikeComputer
 
-# Getting Started
+A React Native frontend for an ESP32-based bicycle computer. Communicates with the ESP32 over Bluetooth Low Energy (BLE), providing real-time speed measurement, session recording, GPS route tracking, and ride history.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+---
 
-## Step 1: Start Metro
+## Screens
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+| Screen | Description |
+|---|---|
+| **Scan** | Scan for BLE devices and connect |
+| **Dashboard** | Current speed, clock, session controls |
+| **Session** | F1-style speed chart, detailed stats, landscape mode |
+| **History** | Saved sessions list, speed graph with touch interaction, GPS route map |
+| **Settings** | Wheel size configuration, send to ESP32 |
+| **Sensor Test** | Sensor placement assistant: live signal, signal quality, pulse history |
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+---
 
-```sh
-# Using npm
-npm start
+## Tech Stack
 
-# OR using Yarn
-yarn start
+- **React Native** 0.74 (TypeScript)
+- **react-native-ble-plx** – BLE communication
+- **react-native-maps** – GPS route display
+- **@react-native-community/geolocation** – GPS coordinate collection
+- **victory-native** – interactive speed chart
+- **zustand** – global state management (session data)
+- **@react-native-async-storage/async-storage** – local session database
+- **react-native-quick-base64** – BLE data decoding
+- **@react-navigation/native-stack** – screen navigation
+
+---
+
+## Installation
+
+### 1. Install dependencies
+
+```bash
+npm install
+cd ios && pod install && cd ..   # iOS only
 ```
 
-## Step 2: Build and run your app
+### 2. Android permissions
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+Add to `android/app/src/main/AndroidManifest.xml` inside the `<manifest>` tag:
 
-### Android
+```xml
+<!-- Bluetooth -->
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
 
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+<!-- Location (required for BLE scanning and GPS) -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 ```
 
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
+To enable screen rotation, remove this line from the `<activity>` tag (if present):
+```xml
+android:screenOrientation="portrait"
 ```
 
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
+For the map to work, add your Google Maps API key inside `<application>`:
+```xml
+<meta-data
+  android:name="com.google.android.geo.API_KEY"
+  android:value="YOUR_API_KEY_HERE"/>
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+Get a free API key at [Google Cloud Console](https://console.cloud.google.com) — enable **Maps SDK for Android**.
 
-```sh
-# Using npm
-npm run ios
+### 3. iOS permissions
 
-# OR using Yarn
-yarn ios
+Add to `ios/<AppName>/Info.plist`:
+
+```xml
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>The app uses Bluetooth to connect to the ESP32 bike computer.</string>
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>The app uses GPS to record your route.</string>
+<key>NSLocationAlwaysUsageDescription</key>
+<string>The app uses GPS to record your route while cycling.</string>
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+### 4. Run
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+```bash
+# Android
+npx react-native run-android
 
-## Step 3: Modify your app
+# iOS
+npx react-native run-ios
+```
 
-Now that you have successfully run the app, let's make changes!
+> ⚠️ BLE and GPS require a **physical device**. Emulators do not support real Bluetooth or GPS.
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+---
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+## ESP32 BLE Configuration
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+### UUIDs
 
-## Congratulations! :tada:
+```cpp
+#define SERVICE_UUID        "12345678-1234-1234-1234-1234567890ab"
+#define NOTIFY_CHAR_UUID    "abcdefab-1234-1234-1234-abcdefabcdef"  // ESP32 → App
+#define WRITE_CHAR_UUID     "abcdefab-1234-1234-1234-abcdefabcdf0"  // App → ESP32
+```
 
-You've successfully run and modified your React Native App. :partying_face:
+### Data format (NOTIFY)
 
-### Now what?
+The ESP32 sends data as a CSV string:
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+```
+<speed km/h>,<distance km>,<pulse count>
+```
 
-# Troubleshooting
+Example: `23.4,1.23,596`
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+### Receiving wheel circumference (WRITE)
 
-# Learn More
+The app sends the wheel circumference as a plain string in meters:
 
-To learn more about React Native, take a look at the following resources:
+```
+2.1900
+```
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+On the ESP32 side, read it in `WriteCallback` using `pChar->getValue().c_str()` then `.toFloat()`.
+
+### Recommended ESP32 loop logic
+
+```cpp
+// Interrupt-based sensor handling
+void IRAM_ATTR onPulse() {
+  unsigned long now = millis();
+  if (now - lastPulseTime > 50) {  // 50ms debounce
+    newPulse = true;
+    lastPulseTime = now;
+  }
+}
+
+// Speed calculation in loop
+if (newPulse) {
+  newPulse = false;
+  totalPulses++;
+
+  float deltaS = (lastPulseTime - prevPulseTime) / 1000.0;
+  float speedKmh = (wheelCircumference / deltaS) * 3.6;
+  prevPulseTime = lastPulseTime;
+
+  float distKm = (totalPulses * wheelCircumference) / 1000.0;
+
+  // Send CSV over BLE notify
+  String msg = String(speedKmh, 1) + "," + String(distKm, 2) + "," + String(totalPulses);
+  pNotifyChar->setValue(msg.c_str());
+  pNotifyChar->notify();
+}
+
+// Send zero speed if no pulse for 3 seconds
+if (prevPulseTime > 0 && (millis() - lastPulseTime) > 3000) {
+  prevPulseTime = 0;
+  float distKm = (totalPulses * wheelCircumference) / 1000.0;
+  String msg = "0.0," + String(distKm, 2) + "," + String(totalPulses);
+  pNotifyChar->setValue(msg.c_str());
+  pNotifyChar->notify();
+}
+```
+
+---
+
+## Project Structure
+
+```
+BikeComputer/
+├── App.tsx                          # Navigation setup, route types
+├── src/
+│   ├── db/
+│   │   └── sessionDB.ts             # AsyncStorage CRUD operations
+│   ├── store/
+│   │   └── sessionStore.ts          # Zustand state + GPS logic
+│   └── screens/
+│       ├── ScanScreen.tsx           # BLE device scanner
+│       ├── DashboardScreen.tsx      # Main screen
+│       ├── SessionScreen.tsx        # Live session detail view
+│       ├── HistoryScreen.tsx        # Past sessions + map
+│       ├── SettingsScreen.tsx       # Wheel size configuration
+│       └── SensorTestScreen.tsx     # Sensor calibration helper
+└── package.json
+```
+
+---
+
+## Data Flow
+
+```
+ESP32 sensor
+    │  interrupt (wheel rotation)
+    ▼
+ESP32 speed calculation
+    │  BLE Notify: "23.4,1.23,596"
+    ▼
+sessionStore.onSpeedData()
+    │  session-relative distance = abs - offset
+    ▼
+sessionStore.tick()  (every 1 second)
+    │  records SessionPoint { t, spd }
+    ▼
+Geolocation.watchPosition()
+    │  records GpsPoint { lat, lng, t }  (every ≥5m movement)
+    ▼
+stopSession() → SessionDB.save()
+    │  persisted to AsyncStorage
+    ▼
+HistoryScreen  →  speed chart + route map
+```
+
+---
+
+## Wheel Circumference Reference
+
+| Size | Circumference |
+|---|---|
+| 20" | 1.59 m |
+| 24" | 1.91 m |
+| 26" | 2.07 m |
+| **27.5"** | **2.19 m** ← default |
+| 28" / 700c | 2.20 m |
+| 29" | 2.29 m |
+
+---
+
+## Known Limitations
+
+- GPS records a point only after at least 5 metres of movement to save battery
+- The live speed chart stores a maximum of 5 minutes of data (300 points); older points are dropped
+- The BLE Write feature (sending wheel circumference) requires the WRITE characteristic to be implemented on the ESP32 side
+- Automatic reconnection attempts up to 3 times with a 2-second delay before showing a disconnect alert

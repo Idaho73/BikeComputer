@@ -1,22 +1,27 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SessionPoint } from '../sessionStore';
 
+export interface GpsPoint {
+  lat: number;
+  lng: number;
+  t: number; // másodperc a session kezdetétől
+}
+
 export interface SavedSession {
   id: string;
-  date: string;           // ISO string
-  duration: number;       // másodperc
-  distance: number;       // km
-  maxSpeed: number;       // km/h
-  avgSpeed: number;       // km/h
+  date: string;
+  duration: number;
+  distance: number;
+  maxSpeed: number;
+  avgSpeed: number;
   totalPulses: number;
-  points: SessionPoint[]; // chart adatok
+  points: SessionPoint[];
+  gpsTrack: GpsPoint[];
 }
 
 const STORAGE_KEY = 'bike_sessions';
 
 export const SessionDB = {
-
-  // Összes session betöltése (legújabb elöl)
   getAll: async (): Promise<SavedSession[]> => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -25,34 +30,26 @@ export const SessionDB = {
       return sessions.sort((a, b) =>
         new Date(b.date).getTime() - new Date(a.date).getTime()
       );
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   },
 
-  // Session mentése
   save: async (session: SavedSession): Promise<void> => {
     try {
       const existing = await SessionDB.getAll();
-      const updated = [session, ...existing];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.error('Session mentési hiba:', e);
-    }
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([session, ...existing]));
+    } catch (e) { console.error('Session mentési hiba:', e); }
   },
 
-  // Session törlése ID alapján
   delete: async (id: string): Promise<void> => {
     try {
       const existing = await SessionDB.getAll();
-      const filtered = existing.filter(s => s.id !== id);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-    } catch (e) {
-      console.error('Session törlési hiba:', e);
-    }
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(existing.filter(s => s.id !== id))
+      );
+    } catch (e) { console.error('Session törlési hiba:', e); }
   },
 
-  // Összes törlése
   deleteAll: async (): Promise<void> => {
     await AsyncStorage.removeItem(STORAGE_KEY);
   },

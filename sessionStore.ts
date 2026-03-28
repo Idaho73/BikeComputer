@@ -1,5 +1,7 @@
 import { create } from 'zustand';
-import { SavedSession, SessionDB } from './db/sessionDB';
+import Geolocation from '@react-native-community/geolocation';
+import { PermissionsAndroid, Platform } from 'react-native';
+import { SessionDB, SavedSession, GpsPoint } from './db/sessionDB';
 
 export interface SessionPoint {
   t: number;
@@ -11,31 +13,39 @@ interface SessionState {
   startTime: number | null;
   elapsed: number;
   points: SessionPoint[];
+  gpsTrack: GpsPoint[];
   currentSpeed: number;
   maxSpeed: number;
-  // Távolság és pulzus: session-relatív (nullázódik session indításkor)
   sessionDistance: number;
   sessionPulses: number;
-  // ESP által küldött abszolút értékek
   absDistance: number;
   absPulses: number;
-  // Abszolút értékek session indításakor (offset)
   offsetDistance: number;
   offsetPulses: number;
   lastSavedId: string | null;
+  gpsWatchId: number | null;
 
-  startSession: () => void;
+  startSession: () => Promise<void>;
   stopSession: () => Promise<void>;
   tick: () => void;
   onSpeedData: (spd: number, dst: number, pls: number) => void;
   reset: () => void;
 }
 
+const requestLocationPermission = async (): Promise<boolean> => {
+  if (Platform.OS !== 'android') return true;
+  const result = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+  );
+  return result === PermissionsAndroid.RESULTS.GRANTED;
+};
+
 export const useSessionStore = create<SessionState>()((set, get) => ({
   running: false,
   startTime: null,
   elapsed: 0,
   points: [],
+  gpsTrack: [],
   currentSpeed: 0,
   maxSpeed: 0,
   sessionDistance: 0,
@@ -45,33 +55,84 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
   offsetDistance: 0,
   offsetPulses: 0,
   lastSavedId: null,
+  gpsWatchId: null,
 
-  startSession: () => {
+  startSession: async () => {
     const { absDistance, absPulses } = get();
+    const startTime = Date.now();
+
     set({
       running: true,
-      startTime: Date.now(),
+      startTime,
       elapsed: 0,
       points: [],
+      gpsTrack: [],
       maxSpeed: 0,
       sessionDistance: 0,
       sessionPulses: 0,
-      // Eltároljuk az aktuális abszolút értékeket offsetként
       offsetDistance: absDistance,
       offsetPulses: absPulses,
       lastSavedId: null,
     });
+
+    // GPS indítása
+    const hasPermission = await requestLocationPermission();
+    if (!hasPermission) return;
+
+    Geolocation.setRNConfiguration({ skipPermissionRequests: true });
+
+    const watchId = Geolocation.watchPosition(
+      (position) => {
+        const { running, gpsTrack, startTime: st } = get();
+        if (!running || !st) return;
+
+        const t = Math.floor((Date.now() - st) / 1000);
+        const newPoint: GpsPoint = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          t,
+        };
+
+        // GPS pont csak ha legalább ~5 méter eltelt (szűrés)
+        const last = gpsTrack[gpsTrack.length - 1];
+        if (last) {
+          const dLat = Math.abs(newPoint.lat - last.lat);
+          const dLng = Math.abs(newPoint.lng - last.lng);
+          // ~5 méter ~= 0.000045 fok
+          if (dLat < 0.000045 && dLng < 0.000045) return;
+        }
+
+        set({ gpsTrack: [...gpsTrack, newPoint] });
+      },
+      (error) => console.warn('GPS hiba:', error.message),
+      {
+        enableHighAccuracy: true,
+        distanceFilter: 5,       // minimum 5 méter elmozdulás
+        interval: 3000,          // min 3 mp
+        fastestInterval: 2000,
+      }
+    );
+
+    set({ gpsWatchId: watchId });
   },
 
   stopSession: async () => {
-    const { startTime, elapsed, points, maxSpeed, sessionDistance, sessionPulses } = get();
-    set({ running: false });
+    const {
+      startTime, elapsed, points, gpsTrack, maxSpeed,
+      sessionDistance, sessionPulses, gpsWatchId,
+    } = get();
+
+    // GPS leállítása
+    if (gpsWatchId !== null) {
+      Geolocation.clearWatch(gpsWatchId);
+    }
+
+    set({ running: false, gpsWatchId: null });
     if (!startTime || elapsed < 5) return;
 
     const movingPoints = points.filter(p => p.spd > 0);
     const avgSpeed = movingPoints.length > 0
-      ? movingPoints.reduce((a, b) => a + b.spd, 0) / movingPoints.length
-      : 0;
+      ? movingPoints.reduce((a, b) => a + b.spd, 0) / movingPoints.length : 0;
 
     const session: SavedSession = {
       id: `session_${Date.now()}`,
@@ -82,7 +143,9 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
       avgSpeed,
       totalPulses: sessionPulses,
       points,
+      gpsTrack,
     };
+
     await SessionDB.save(session);
     set({ lastSavedId: session.id });
   },
@@ -110,19 +173,25 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
     });
   },
 
-  reset: () => set({
-    running: false,
-    startTime: null,
-    elapsed: 0,
-    points: [],
-    currentSpeed: 0,
-    maxSpeed: 0,
-    sessionDistance: 0,
-    sessionPulses: 0,
-    absDistance: 0,
-    absPulses: 0,
-    offsetDistance: 0,
-    offsetPulses: 0,
-    lastSavedId: null,
-  }),
+  reset: () => {
+    const { gpsWatchId } = get();
+    if (gpsWatchId !== null) Geolocation.clearWatch(gpsWatchId);
+    set({
+      running: false,
+      startTime: null,
+      elapsed: 0,
+      points: [],
+      gpsTrack: [],
+      currentSpeed: 0,
+      maxSpeed: 0,
+      sessionDistance: 0,
+      sessionPulses: 0,
+      absDistance: 0,
+      absPulses: 0,
+      offsetDistance: 0,
+      offsetPulses: 0,
+      lastSavedId: null,
+      gpsWatchId: null,
+    });
+  },
 }));
